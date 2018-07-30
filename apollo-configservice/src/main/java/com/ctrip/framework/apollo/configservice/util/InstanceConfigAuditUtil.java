@@ -12,7 +12,7 @@ import com.ctrip.framework.apollo.biz.entity.InstanceConfig;
 import com.ctrip.framework.apollo.biz.service.InstanceService;
 import com.ctrip.framework.apollo.core.ConfigConsts;
 import com.ctrip.framework.apollo.core.utils.ApolloThreadFactory;
-import com.dianping.cat.Cat;
+import com.ctrip.framework.apollo.tracer.Tracer;
 
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,9 +33,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 public class InstanceConfigAuditUtil implements InitializingBean {
-  private static final int INSTANCE_CONFIG_AUDIT_MAX_SIZE = 2000;
-  private static final int INSTANCE_CACHE_MAX_SIZE = 10000;
-  private static final int INSTANCE_CONFIG_CACHE_MAX_SIZE = 10000;
+  private static final int INSTANCE_CONFIG_AUDIT_MAX_SIZE = 10000;
+  private static final int INSTANCE_CACHE_MAX_SIZE = 50000;
+  private static final int INSTANCE_CONFIG_CACHE_MAX_SIZE = 50000;
+  private static final long OFFER_TIME_LAST_MODIFIED_TIME_THRESHOLD_IN_MILLI = TimeUnit.MINUTES.toMillis(10);//10 minutes
   private static final Joiner STRING_JOINER = Joiner.on(ConfigConsts.CLUSTER_NAMESPACE_SEPARATOR);
   private final ExecutorService auditExecutorService;
   private final AtomicBoolean auditStopped;
@@ -74,7 +75,7 @@ public class InstanceConfigAuditUtil implements InitializingBean {
 
     //load instance config release key from cache, and check if release key is the same
     String instanceConfigCacheKey = assembleInstanceConfigKey(instanceId, auditModel
-        .getConfigAppId(), auditModel.getConfigClusterName(), auditModel.getConfigNamespace());
+        .getConfigAppId(), auditModel.getConfigNamespace());
     String cacheReleaseKey = instanceConfigReleaseKeyCache.getIfPresent(instanceConfigCacheKey);
 
     //if release key is the same, then skip audit
@@ -86,13 +87,21 @@ public class InstanceConfigAuditUtil implements InitializingBean {
 
     //if release key is not the same or cannot find in cache, then do audit
     InstanceConfig instanceConfig = instanceService.findInstanceConfig(instanceId, auditModel
-        .getConfigAppId(), auditModel.getConfigClusterName(), auditModel.getConfigNamespace());
+        .getConfigAppId(), auditModel.getConfigNamespace());
 
-    //we need to update no matter the release key is the same or not, to ensure the
-    //last modified time is updated each day
     if (instanceConfig != null) {
-      instanceConfig.setReleaseKey(auditModel.getReleaseKey());
-      instanceConfig.setDataChangeLastModifiedTime(new Date());
+      if (!Objects.equals(instanceConfig.getReleaseKey(), auditModel.getReleaseKey())) {
+        instanceConfig.setConfigClusterName(auditModel.getConfigClusterName());
+        instanceConfig.setReleaseKey(auditModel.getReleaseKey());
+        instanceConfig.setReleaseDeliveryTime(auditModel.getOfferTime());
+      } else if (offerTimeAndLastModifiedTimeCloseEnough(auditModel.getOfferTime(),
+          instanceConfig.getDataChangeLastModifiedTime())) {
+        //when releaseKey is the same, optimize to reduce writes if the record was updated not long ago
+        return;
+      }
+      //we need to update no matter the release key is the same or not, to ensure the
+      //last modified time is updated each day
+      instanceConfig.setDataChangeLastModifiedTime(auditModel.getOfferTime());
       instanceService.updateInstanceConfig(instanceConfig);
       return;
     }
@@ -103,12 +112,19 @@ public class InstanceConfigAuditUtil implements InitializingBean {
     instanceConfig.setConfigClusterName(auditModel.getConfigClusterName());
     instanceConfig.setConfigNamespaceName(auditModel.getConfigNamespace());
     instanceConfig.setReleaseKey(auditModel.getReleaseKey());
+    instanceConfig.setReleaseDeliveryTime(auditModel.getOfferTime());
+    instanceConfig.setDataChangeCreatedTime(auditModel.getOfferTime());
 
     try {
       instanceService.createInstanceConfig(instanceConfig);
     } catch (DataIntegrityViolationException ex) {
       //concurrent insertion, safe to ignore
     }
+  }
+
+  private boolean offerTimeAndLastModifiedTimeCloseEnough(Date offerTime, Date lastModifiedTime) {
+    return (offerTime.getTime() - lastModifiedTime.getTime()) <
+        OFFER_TIME_LAST_MODIFIED_TIME_THRESHOLD_IN_MILLI;
   }
 
   private long prepareInstanceId(InstanceConfigAuditModel auditModel) {
@@ -145,7 +161,7 @@ public class InstanceConfigAuditUtil implements InitializingBean {
           }
           doAudit(model);
         } catch (Throwable ex) {
-          Cat.logError(ex);
+          Tracer.logError(ex);
         }
       }
     });
@@ -159,10 +175,8 @@ public class InstanceConfigAuditUtil implements InitializingBean {
     return STRING_JOINER.join(keyParts);
   }
 
-  private String assembleInstanceConfigKey(long instanceId, String configAppId, String
-      configClusterName,
-                                           String configNamespace) {
-    return STRING_JOINER.join(instanceId, configAppId, configClusterName, configNamespace);
+  private String assembleInstanceConfigKey(long instanceId, String configAppId, String configNamespace) {
+    return STRING_JOINER.join(instanceId, configAppId, configNamespace);
   }
 
   public static class InstanceConfigAuditModel {
@@ -174,10 +188,12 @@ public class InstanceConfigAuditUtil implements InitializingBean {
     private String configClusterName;
     private String configNamespace;
     private String releaseKey;
+    private Date offerTime;
 
     public InstanceConfigAuditModel(String appId, String clusterName, String dataCenter, String
         clientIp, String configAppId, String configClusterName, String configNamespace, String
                                         releaseKey) {
+      this.offerTime = new Date();
       this.appId = appId;
       this.clusterName = clusterName;
       this.dataCenter = Strings.isNullOrEmpty(dataCenter) ? "" : dataCenter;
@@ -218,6 +234,10 @@ public class InstanceConfigAuditUtil implements InitializingBean {
 
     public String getConfigClusterName() {
       return configClusterName;
+    }
+
+    public Date getOfferTime() {
+      return offerTime;
     }
 
     @Override

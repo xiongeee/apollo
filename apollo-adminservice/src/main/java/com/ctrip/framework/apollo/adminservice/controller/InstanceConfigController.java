@@ -1,6 +1,7 @@
 package com.ctrip.framework.apollo.adminservice.controller;
 
 import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Multimap;
@@ -61,13 +62,34 @@ public class InstanceConfigController {
     List<InstanceDTO> instanceDTOs = Collections.emptyList();
 
     if (instanceConfigsPage.hasContent()) {
-      Set<Long> instanceIds = instanceConfigsPage.getContent().stream().map
-          (InstanceConfig::getInstanceId).collect(Collectors.toSet());
+      Multimap<Long, InstanceConfig> instanceConfigMap = HashMultimap.create();
+      Set<String> otherReleaseKeys = Sets.newHashSet();
+
+      for (InstanceConfig instanceConfig : instanceConfigsPage.getContent()) {
+        instanceConfigMap.put(instanceConfig.getInstanceId(), instanceConfig);
+        otherReleaseKeys.add(instanceConfig.getReleaseKey());
+      }
+
+      Set<Long> instanceIds = instanceConfigMap.keySet();
 
       List<Instance> instances = instanceService.findInstancesByIds(instanceIds);
 
       if (!CollectionUtils.isEmpty(instances)) {
         instanceDTOs = BeanUtils.batchTransform(InstanceDTO.class, instances);
+      }
+
+      for (InstanceDTO instanceDTO : instanceDTOs) {
+        Collection<InstanceConfig> configs = instanceConfigMap.get(instanceDTO.getId());
+        List<InstanceConfigDTO> configDTOs = configs.stream().map(instanceConfig -> {
+          InstanceConfigDTO instanceConfigDTO = new InstanceConfigDTO();
+          //to save some space
+          instanceConfigDTO.setRelease(null);
+          instanceConfigDTO.setReleaseDeliveryTime(instanceConfig.getReleaseDeliveryTime());
+          instanceConfigDTO.setDataChangeLastModifiedTime(instanceConfig
+              .getDataChangeLastModifiedTime());
+          return instanceConfigDTO;
+        }).collect(Collectors.toList());
+        instanceDTO.setConfigs(configDTOs);
       }
     }
 
@@ -126,6 +148,7 @@ public class InstanceConfigController {
       List<InstanceConfigDTO> configDTOs = configs.stream().map(instanceConfig -> {
         InstanceConfigDTO instanceConfigDTO = new InstanceConfigDTO();
         instanceConfigDTO.setRelease(releaseMap.get(instanceConfig.getReleaseKey()));
+        instanceConfigDTO.setReleaseDeliveryTime(instanceConfig.getReleaseDeliveryTime());
         instanceConfigDTO.setDataChangeLastModifiedTime(instanceConfig
             .getDataChangeLastModifiedTime());
         return instanceConfigDTO;
@@ -137,12 +160,20 @@ public class InstanceConfigController {
   }
 
   @RequestMapping(value = "/by-namespace", method = RequestMethod.GET)
-  public PageDTO<InstanceDTO> getInstancesByNamespace(@RequestParam("appId") String appId,
-                                                   @RequestParam("clusterName") String clusterName,
-                                                   @RequestParam("namespaceName") String
-                                                       namespaceName, Pageable pageable) {
-    Page<Instance> instances = instanceService.findInstancesByNamespace(appId, clusterName,
-        namespaceName, pageable);
+  public PageDTO<InstanceDTO> getInstancesByNamespace(
+      @RequestParam("appId") String appId, @RequestParam("clusterName") String clusterName,
+      @RequestParam("namespaceName") String namespaceName,
+      @RequestParam(value = "instanceAppId", required = false) String instanceAppId,
+      Pageable pageable) {
+    Page<Instance> instances;
+    if (Strings.isNullOrEmpty(instanceAppId)) {
+      instances = instanceService.findInstancesByNamespace(appId, clusterName,
+          namespaceName, pageable);
+    } else {
+      instances = instanceService.findInstancesByNamespaceAndInstanceAppId(instanceAppId, appId,
+          clusterName, namespaceName, pageable);
+    }
+
     List<InstanceDTO> instanceDTOs = BeanUtils.batchTransform(InstanceDTO.class, instances.getContent());
     return new PageDTO<>(instanceDTOs, pageable, instances.getTotalElements());
   }

@@ -1,16 +1,16 @@
 package com.ctrip.framework.apollo.internals;
 
-import com.ctrip.framework.apollo.core.enums.ConfigFileFormat;
-import com.ctrip.framework.apollo.core.utils.PropertiesUtil;
-import com.ctrip.framework.apollo.exceptions.ApolloConfigException;
-import com.ctrip.framework.apollo.util.ExceptionUtil;
-import com.dianping.cat.Cat;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Properties;
-import java.util.concurrent.atomic.AtomicReference;
+import com.ctrip.framework.apollo.core.enums.ConfigFileFormat;
+import com.ctrip.framework.apollo.core.utils.PropertiesUtil;
+import com.ctrip.framework.apollo.exceptions.ApolloConfigException;
+import com.ctrip.framework.apollo.tracer.Tracer;
+import com.ctrip.framework.apollo.util.ExceptionUtil;
 
 /**
  * @author Jason Song(song_s@ctrip.com)
@@ -26,6 +26,12 @@ public class PropertiesConfigFile extends AbstractConfigFile {
   }
 
   @Override
+  protected void update(Properties newProperties) {
+    m_configProperties.set(newProperties);
+    m_contentCache.set(null);
+  }
+
+  @Override
   public String getContent() {
     if (m_contentCache.get() == null) {
       m_contentCache.set(doGetContent());
@@ -34,7 +40,7 @@ public class PropertiesConfigFile extends AbstractConfigFile {
   }
 
   String doGetContent() {
-    if (m_configProperties.get() == null) {
+    if (!this.hasContent()) {
       return null;
     }
 
@@ -45,7 +51,7 @@ public class PropertiesConfigFile extends AbstractConfigFile {
           new ApolloConfigException(String
               .format("Parse properties file content failed for namespace: %s, cause: %s",
                   m_namespace, ExceptionUtil.getDetailMessage(ex)));
-      Cat.logError(exception);
+      Tracer.logError(exception);
       throw exception;
     }
   }
@@ -60,9 +66,4 @@ public class PropertiesConfigFile extends AbstractConfigFile {
     return ConfigFileFormat.Properties;
   }
 
-  @Override
-  public synchronized void onRepositoryChange(String namespace, Properties newProperties) {
-    super.onRepositoryChange(namespace, newProperties);
-    m_contentCache.set(null);
-  }
 }

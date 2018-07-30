@@ -9,12 +9,12 @@ import com.ctrip.framework.apollo.biz.message.Topics;
 import com.ctrip.framework.apollo.biz.repository.ReleaseRepository;
 import com.ctrip.framework.apollo.biz.service.NamespaceService;
 import com.ctrip.framework.apollo.biz.service.ReleaseService;
-import com.ctrip.framework.apollo.core.ConfigConsts;
 import com.ctrip.framework.apollo.common.dto.AppDTO;
 import com.ctrip.framework.apollo.common.dto.ClusterDTO;
 import com.ctrip.framework.apollo.common.dto.ItemDTO;
 import com.ctrip.framework.apollo.common.dto.NamespaceDTO;
 import com.ctrip.framework.apollo.common.dto.ReleaseDTO;
+import com.ctrip.framework.apollo.core.ConfigConsts;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -121,7 +121,7 @@ public class ReleaseControllerTest extends AbstractControllerTest {
         .thenReturn(someNamespace);
 
     releaseController
-        .buildRelease(someAppId, someCluster, someNamespaceName, someName, someComment, "test");
+        .publish(someAppId, someCluster, someNamespaceName, someName, someComment, "test", false);
 
     verify(someMessageSender, times(1))
         .sendMessage(Joiner.on(ConfigConsts.CLUSTER_NAMESPACE_SEPARATOR)

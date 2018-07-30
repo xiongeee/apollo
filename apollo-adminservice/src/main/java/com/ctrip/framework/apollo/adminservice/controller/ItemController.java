@@ -1,6 +1,17 @@
 package com.ctrip.framework.apollo.adminservice.controller;
 
-import java.util.List;
+import com.ctrip.framework.apollo.adminservice.aop.PreAcquireNamespaceLock;
+import com.ctrip.framework.apollo.biz.entity.Commit;
+import com.ctrip.framework.apollo.biz.entity.Item;
+import com.ctrip.framework.apollo.biz.entity.Namespace;
+import com.ctrip.framework.apollo.biz.service.CommitService;
+import com.ctrip.framework.apollo.biz.service.ItemService;
+import com.ctrip.framework.apollo.biz.service.NamespaceService;
+import com.ctrip.framework.apollo.biz.utils.ConfigChangeContentBuilder;
+import com.ctrip.framework.apollo.common.dto.ItemDTO;
+import com.ctrip.framework.apollo.common.exception.BadRequestException;
+import com.ctrip.framework.apollo.common.exception.NotFoundException;
+import com.ctrip.framework.apollo.common.utils.BeanUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,18 +21,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.ctrip.framework.apollo.adminservice.aop.PreAcquireNamespaceLock;
-import com.ctrip.framework.apollo.biz.entity.Commit;
-import com.ctrip.framework.apollo.biz.entity.Item;
-import com.ctrip.framework.apollo.biz.entity.Namespace;
-import com.ctrip.framework.apollo.biz.service.CommitService;
-import com.ctrip.framework.apollo.biz.service.ItemService;
-import com.ctrip.framework.apollo.biz.service.NamespaceService;
-import com.ctrip.framework.apollo.biz.utils.ConfigChangeContentBuilder;
-import com.ctrip.framework.apollo.common.utils.BeanUtils;
-import com.ctrip.framework.apollo.common.dto.ItemDTO;
-import com.ctrip.framework.apollo.common.exception.BadRequestException;
-import com.ctrip.framework.apollo.common.exception.NotFoundException;
+import java.util.List;
 
 @RestController
 public class ItemController {
@@ -45,13 +45,6 @@ public class ItemController {
     if (managedEntity != null) {
       throw new BadRequestException("item already exist");
     } else {
-      Item lastItem = itemService.findLastOne(appId, clusterName, namespaceName);
-      int lineNum = 1;
-      if (lastItem != null) {
-        Integer lastItemNum = lastItem.getLineNum();
-        lineNum = lastItemNum == null ? 1 : lastItemNum + 1;
-      }
-      entity.setLineNum(lineNum);
       entity = itemService.save(entity);
       builder.createItem(entity);
     }
@@ -97,14 +90,16 @@ public class ItemController {
     builder.updateItem(beforeUpdateItem, entity);
     itemDTO = BeanUtils.transfrom(ItemDTO.class, entity);
 
-    Commit commit = new Commit();
-    commit.setAppId(appId);
-    commit.setClusterName(clusterName);
-    commit.setNamespaceName(namespaceName);
-    commit.setChangeSets(builder.build());
-    commit.setDataChangeCreatedBy(itemDTO.getDataChangeLastModifiedBy());
-    commit.setDataChangeLastModifiedBy(itemDTO.getDataChangeLastModifiedBy());
-    commitService.save(commit);
+    if (builder.hasContent()) {
+      Commit commit = new Commit();
+      commit.setAppId(appId);
+      commit.setClusterName(clusterName);
+      commit.setNamespaceName(namespaceName);
+      commit.setChangeSets(builder.build());
+      commit.setDataChangeCreatedBy(itemDTO.getDataChangeLastModifiedBy());
+      commit.setDataChangeLastModifiedBy(itemDTO.getDataChangeLastModifiedBy());
+      commitService.save(commit);
+    }
 
     return itemDTO;
   }
@@ -130,14 +125,14 @@ public class ItemController {
     commitService.save(commit);
   }
 
-  @RequestMapping("/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/items")
+  @RequestMapping(value = "/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/items", method = RequestMethod.GET)
   public List<ItemDTO> findItems(@PathVariable("appId") String appId,
                                  @PathVariable("clusterName") String clusterName,
                                  @PathVariable("namespaceName") String namespaceName) {
-    return BeanUtils.batchTransform(ItemDTO.class, itemService.findItems(appId, clusterName, namespaceName));
+    return BeanUtils.batchTransform(ItemDTO.class, itemService.findItemsWithOrdered(appId, clusterName, namespaceName));
   }
 
-  @RequestMapping("/items/{itemId}")
+  @RequestMapping(value = "/items/{itemId}", method = RequestMethod.GET)
   public ItemDTO get(@PathVariable("itemId") long itemId) {
     Item item = itemService.findOne(itemId);
     if (item == null) {
@@ -146,7 +141,7 @@ public class ItemController {
     return BeanUtils.transfrom(ItemDTO.class, item);
   }
 
-  @RequestMapping("/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/items/{key:.+}")
+  @RequestMapping(value = "/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/items/{key:.+}", method = RequestMethod.GET)
   public ItemDTO get(@PathVariable("appId") String appId,
                      @PathVariable("clusterName") String clusterName,
                      @PathVariable("namespaceName") String namespaceName, @PathVariable("key") String key) {
@@ -157,4 +152,6 @@ public class ItemController {
     }
     return BeanUtils.transfrom(ItemDTO.class, item);
   }
+
+
 }

@@ -18,20 +18,33 @@ public class ConsumerPermissionValidator {
   @Autowired
   private ConsumerAuthUtil consumerAuthUtil;
 
-  public boolean hasModifyNamespacePermission(HttpServletRequest request, String appId, String
-      namespaceName) {
+
+  public boolean hasModifyNamespacePermission(HttpServletRequest request, String appId, String namespaceName,
+      String env) {
+    if (hasCreateNamespacePermission(request, appId)) {
+      return true;
+    }
     return permissionService.consumerHasPermission(consumerAuthUtil.retrieveConsumerId(request),
         PermissionType.MODIFY_NAMESPACE,
-        RoleUtils.buildNamespaceTargetId(appId, namespaceName));
+        RoleUtils.buildNamespaceTargetId(appId, namespaceName, env));
 
   }
 
-  public boolean hasReleaseNamespacePermission(HttpServletRequest request, String appId, String
-      namespaceName) {
+  public boolean hasReleaseNamespacePermission(HttpServletRequest request, String appId, String namespaceName,
+      String env) {
+    if (hasCreateNamespacePermission(request, appId)) {
+      return true;
+    }
     return permissionService.consumerHasPermission(consumerAuthUtil.retrieveConsumerId(request),
         PermissionType.RELEASE_NAMESPACE,
-        RoleUtils.buildNamespaceTargetId(appId, namespaceName));
+        RoleUtils.buildNamespaceTargetId(appId, namespaceName, env));
 
+  }
+
+  public boolean hasCreateNamespacePermission(HttpServletRequest request, String appId) {
+    return permissionService.consumerHasPermission(consumerAuthUtil.retrieveConsumerId(request),
+                                                   PermissionType.CREATE_NAMESPACE,
+                                                   appId);
   }
 
 }

@@ -7,7 +7,7 @@ import com.google.common.collect.Queues;
 import com.ctrip.framework.apollo.core.utils.ApolloThreadFactory;
 import com.ctrip.framework.apollo.openapi.entity.ConsumerAudit;
 import com.ctrip.framework.apollo.openapi.service.ConsumerService;
-import com.dianping.cat.Cat;
+import com.ctrip.framework.apollo.tracer.Tracer;
 
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +46,10 @@ public class ConsumerAuditUtil implements InitializingBean {
   }
 
   public boolean audit(HttpServletRequest request, long consumerId) {
+    //ignore GET request
+    if ("GET".equalsIgnoreCase(request.getMethod())) {
+      return true;
+    }
     String uri = request.getRequestURI();
     if (!Strings.isNullOrEmpty(request.getQueryString())) {
       uri += "?" + request.getQueryString();
@@ -74,7 +78,7 @@ public class ConsumerAuditUtil implements InitializingBean {
             consumerService.createConsumerAudits(toAudit);
           }
         } catch (Throwable ex) {
-          Cat.logError(ex);
+          Tracer.logError(ex);
         }
       }
     });

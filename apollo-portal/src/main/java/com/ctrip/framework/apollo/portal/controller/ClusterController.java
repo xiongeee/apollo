@@ -5,8 +5,8 @@ import com.ctrip.framework.apollo.common.exception.BadRequestException;
 import com.ctrip.framework.apollo.common.utils.InputValidator;
 import com.ctrip.framework.apollo.common.utils.RequestPrecondition;
 import com.ctrip.framework.apollo.core.enums.Env;
-import com.ctrip.framework.apollo.portal.auth.UserInfoHolder;
 import com.ctrip.framework.apollo.portal.service.ClusterService;
+import com.ctrip.framework.apollo.portal.spi.UserInfoHolder;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Objects;
 
 import static com.ctrip.framework.apollo.common.utils.RequestPrecondition.checkModel;
 
@@ -32,7 +34,7 @@ public class ClusterController {
   public ClusterDTO createCluster(@PathVariable String appId, @PathVariable String env,
                                   @RequestBody ClusterDTO cluster) {
 
-    checkModel(cluster != null);
+    checkModel(Objects.nonNull(cluster));
     RequestPrecondition.checkArgumentsNotEmpty(cluster.getAppId(), cluster.getName());
 
     if (!InputValidator.isValidClusterNamespace(cluster.getName())) {
@@ -50,9 +52,14 @@ public class ClusterController {
   @RequestMapping(value = "apps/{appId}/envs/{env}/clusters/{clusterName:.+}", method = RequestMethod.DELETE)
   public ResponseEntity<Void> deleteCluster(@PathVariable String appId, @PathVariable String env,
                                             @PathVariable String clusterName){
-    clusterService.deleteCluster(Env.valueOf(env), appId, clusterName);
+    clusterService.deleteCluster(Env.fromString(env), appId, clusterName);
     return ResponseEntity.ok().build();
   }
 
+  @RequestMapping(value = "apps/{appId}/envs/{env}/clusters/{clusterName:.+}", method = RequestMethod.GET)
+  public ClusterDTO loadCluster(@PathVariable("appId") String appId, @PathVariable String env, @PathVariable("clusterName") String clusterName) {
+
+    return clusterService.loadCluster(appId, Env.fromString(env), clusterName);
+  }
 
 }

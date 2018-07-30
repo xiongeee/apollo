@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
+import java.math.BigInteger;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
@@ -55,10 +56,10 @@ public class InstanceService {
   }
 
   public InstanceConfig findInstanceConfig(long instanceId, String configAppId, String
-      configClusterName, String configNamespaceName) {
+      configNamespaceName) {
     return instanceConfigRepository
-        .findByInstanceIdAndConfigAppIdAndConfigClusterNameAndConfigNamespaceName(
-            instanceId, configAppId, configClusterName, configNamespaceName);
+        .findByInstanceIdAndConfigAppIdAndConfigNamespaceName(
+            instanceId, configAppId, configNamespaceName);
   }
 
   public Page<InstanceConfig> findActiveInstanceConfigsByReleaseKey(String releaseKey, Pageable
@@ -83,6 +84,42 @@ public class InstanceService {
     }
 
     return new PageImpl<>(instances, pageable, instanceConfigs.getTotalElements());
+  }
+
+  public Page<Instance> findInstancesByNamespaceAndInstanceAppId(String instanceAppId, String
+      appId, String clusterName, String
+                                                                     namespaceName, Pageable
+                                                                     pageable) {
+    Page<Object[]> instanceIdResult = instanceConfigRepository
+        .findInstanceIdsByNamespaceAndInstanceAppId(instanceAppId, appId, clusterName,
+            namespaceName, getValidInstanceConfigDate(), pageable);
+
+    List<Instance> instances = Collections.emptyList();
+    if (instanceIdResult.hasContent()) {
+      Set<Long> instanceIds = instanceIdResult.getContent().stream().map((Object o) -> {
+        if (o == null) {
+          return null;
+        }
+
+        if (o instanceof Integer) {
+          return ((Integer)o).longValue();
+        }
+
+        if (o instanceof Long) {
+          return (Long) o;
+        }
+
+        //for h2 test
+        if (o instanceof BigInteger) {
+          return ((BigInteger) o).longValue();
+        }
+
+        return null;
+      }).filter((Long value) -> value != null).collect(Collectors.toSet());
+      instances = findInstancesByIds(instanceIds);
+    }
+
+    return new PageImpl<>(instances, pageable, instanceIdResult.getTotalElements());
   }
 
   public List<InstanceConfig> findInstanceConfigsByNamespaceWithReleaseKeysNotIn(String appId,
@@ -126,10 +163,17 @@ public class InstanceService {
     Preconditions.checkArgument(existedInstanceConfig != null, String.format(
         "Instance config %d doesn't exist", instanceConfig.getId()));
 
+    existedInstanceConfig.setConfigClusterName(instanceConfig.getConfigClusterName());
     existedInstanceConfig.setReleaseKey(instanceConfig.getReleaseKey());
+    existedInstanceConfig.setReleaseDeliveryTime(instanceConfig.getReleaseDeliveryTime());
     existedInstanceConfig.setDataChangeLastModifiedTime(instanceConfig
         .getDataChangeLastModifiedTime());
 
     return instanceConfigRepository.save(existedInstanceConfig);
+  }
+
+  @Transactional
+  public int batchDeleteInstanceConfig(String configAppId, String configClusterName, String configNamespaceName){
+    return instanceConfigRepository.batchDelete(configAppId, configClusterName, configNamespaceName);
   }
 }

@@ -1,17 +1,5 @@
 package com.ctrip.framework.apollo.internals;
 
-import com.google.common.collect.ImmutableMap;
-
-import com.ctrip.framework.apollo.core.utils.ClassLoaderUtil;
-import com.ctrip.framework.apollo.enums.PropertyChangeType;
-import com.ctrip.framework.apollo.model.ConfigChange;
-import com.ctrip.framework.apollo.model.ConfigChangeEvent;
-import com.ctrip.framework.apollo.util.ExceptionUtil;
-import com.dianping.cat.Cat;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collections;
@@ -20,7 +8,20 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicReference;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.ctrip.framework.apollo.core.utils.ClassLoaderUtil;
+import com.ctrip.framework.apollo.enums.PropertyChangeType;
+import com.ctrip.framework.apollo.model.ConfigChange;
+import com.ctrip.framework.apollo.model.ConfigChangeEvent;
+import com.ctrip.framework.apollo.tracer.Tracer;
+import com.ctrip.framework.apollo.util.ExceptionUtil;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.util.concurrent.RateLimiter;
 
 
 /**
@@ -32,6 +33,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
   private Properties m_resourceProperties;
   private AtomicReference<Properties> m_configProperties;
   private ConfigRepository m_configRepository;
+  private RateLimiter m_warnLogRateLimiter;
 
   /**
    * Constructor.
@@ -44,6 +46,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
     m_resourceProperties = loadFromResource(m_namespace);
     m_configRepository = configRepository;
     m_configProperties = new AtomicReference<>();
+    m_warnLogRateLimiter = RateLimiter.create(0.017); // 1 warning log output per minute
     initialize();
   }
 
@@ -51,7 +54,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
     try {
       m_configProperties.set(m_configRepository.getConfig());
     } catch (Throwable ex) {
-      Cat.logError(ex);
+      Tracer.logError(ex);
       logger.warn("Init Apollo Local Config failed - namespace: {}, reason: {}.",
           m_namespace, ExceptionUtil.getDetailMessage(ex));
     } finally {
@@ -85,8 +88,8 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
       value = (String) m_resourceProperties.get(key);
     }
 
-    if (value == null && m_configProperties.get() == null) {
-      logger.warn("Could not load config from Apollo, always return default value!");
+    if (value == null && m_configProperties.get() == null && m_warnLogRateLimiter.tryAcquire()) {
+      logger.warn("Could not load config for namespace {} from Apollo, please check whether the configs are released in Apollo! Return default value now!", m_namespace);
     }
 
     return value == null ? defaultValue : value;
@@ -99,7 +102,20 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
       return Collections.emptySet();
     }
 
-    return properties.stringPropertyNames();
+    return stringPropertyNames(properties);
+  }
+
+  private Set<String> stringPropertyNames(Properties properties) {
+    //jdk9以下版本Properties#enumerateStringProperties方法存在性能问题，keys() + get(k) 重复迭代, jdk9之后改为entrySet遍历.
+    Map<String, String> h = new HashMap<>();
+    for (Map.Entry<Object, Object> e : properties.entrySet()) {
+      Object k = e.getKey();
+      Object v = e.getValue();
+      if (k instanceof String && v instanceof String) {
+        h.put((String) k, (String) v);
+      }
+    }
+    return h.keySet();
   }
 
   @Override
@@ -119,7 +135,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
 
     this.fireConfigChange(new ConfigChangeEvent(m_namespace, actualChanges));
 
-    Cat.logEvent("Apollo.Client.ConfigChanges", m_namespace);
+    Tracer.logEvent("Apollo.Client.ConfigChanges", m_namespace);
   }
 
   private Map<String, ConfigChange> updateAndCalcConfigChanges(Properties newConfigProperties) {
@@ -138,6 +154,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
 
     //2. update m_configProperties
     m_configProperties.set(newConfigProperties);
+    clearConfigCache();
 
     //3. use getProperty to update configChange's new value and calc the final changes
     for (ConfigChange change : configChanges) {
@@ -185,7 +202,7 @@ public class DefaultConfig extends AbstractConfig implements RepositoryChangeLis
       try {
         properties.load(in);
       } catch (IOException ex) {
-        Cat.logError(ex);
+        Tracer.logError(ex);
         logger.error("Load resource config for namespace {} failed", namespace, ex);
       } finally {
         try {

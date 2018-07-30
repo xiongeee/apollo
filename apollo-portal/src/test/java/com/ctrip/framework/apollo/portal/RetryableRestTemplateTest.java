@@ -1,10 +1,10 @@
 package com.ctrip.framework.apollo.portal;
 
+import com.ctrip.framework.apollo.common.exception.ServiceException;
 import com.ctrip.framework.apollo.core.dto.ServiceDTO;
 import com.ctrip.framework.apollo.core.enums.Env;
-import com.ctrip.framework.apollo.common.exception.ServiceException;
-import com.ctrip.framework.apollo.portal.api.AdminServiceAddressLocator;
-import com.ctrip.framework.apollo.portal.api.RetryableRestTemplate;
+import com.ctrip.framework.apollo.portal.component.AdminServiceAddressLocator;
+import com.ctrip.framework.apollo.portal.component.RetryableRestTemplate;
 
 import org.apache.http.HttpHost;
 import org.apache.http.conn.ConnectTimeoutException;
@@ -19,7 +19,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestTemplate;
 
-import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,8 +51,9 @@ public class RetryableRestTemplateTest extends AbstractUnitTest {
   @Before
   public void init() {
     socketTimeoutException.initCause(new SocketTimeoutException());
+
     httpHostConnectException
-        .initCause(new HttpHostConnectException(new HttpHost(serviceOne, 80), new ConnectException()));
+        .initCause(new HttpHostConnectException(new ConnectTimeoutException(), new HttpHost(serviceOne, 80)));
     connectTimeoutException.initCause(new ConnectTimeoutException());
   }
 

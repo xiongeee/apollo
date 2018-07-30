@@ -1,13 +1,14 @@
 package com.ctrip.framework.apollo.biz.service;
 
+
+import com.ctrip.framework.apollo.biz.config.BizConfig;
 import com.ctrip.framework.apollo.biz.entity.Audit;
 import com.ctrip.framework.apollo.biz.entity.Item;
 import com.ctrip.framework.apollo.biz.entity.Namespace;
 import com.ctrip.framework.apollo.biz.repository.ItemRepository;
-import com.ctrip.framework.apollo.biz.repository.NamespaceRepository;
-import com.ctrip.framework.apollo.common.utils.BeanUtils;
 import com.ctrip.framework.apollo.common.exception.BadRequestException;
 import com.ctrip.framework.apollo.common.exception.NotFoundException;
+import com.ctrip.framework.apollo.common.utils.BeanUtils;
 import com.ctrip.framework.apollo.core.utils.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +16,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ItemService {
@@ -24,13 +27,14 @@ public class ItemService {
   private ItemRepository itemRepository;
 
   @Autowired
-  private NamespaceRepository namespaceRepository;
+  private NamespaceService namespaceService;
 
   @Autowired
   private AuditService auditService;
 
   @Autowired
-  private ServerConfigService serverConfigService;
+  private BizConfig bizConfig;
+
 
   @Transactional
   public Item delete(long id, String operator) {
@@ -54,8 +58,7 @@ public class ItemService {
   }
 
   public Item findOne(String appId, String clusterName, String namespaceName, String key) {
-    Namespace namespace = namespaceRepository.findByAppIdAndClusterNameAndNamespaceName(appId,
-        clusterName, namespaceName);
+    Namespace namespace = namespaceService.findOne(appId, clusterName, namespaceName);
     if (namespace == null) {
       throw new NotFoundException(
           String.format("namespace not found for %s %s %s", appId, clusterName, namespaceName));
@@ -65,14 +68,16 @@ public class ItemService {
   }
 
   public Item findLastOne(String appId, String clusterName, String namespaceName) {
-    Namespace namespace = namespaceRepository.findByAppIdAndClusterNameAndNamespaceName(appId,
-                                                                                        clusterName, namespaceName);
+    Namespace namespace = namespaceService.findOne(appId, clusterName, namespaceName);
     if (namespace == null) {
       throw new NotFoundException(
           String.format("namespace not found for %s %s %s", appId, clusterName, namespaceName));
     }
-    Item item = itemRepository.findFirst1ByNamespaceIdOrderByLineNumDesc(namespace.getId());
-    return item;
+    return findLastOne(namespace.getId());
+  }
+
+  public Item findLastOne(long namespaceId) {
+    return itemRepository.findFirst1ByNamespaceIdOrderByLineNumDesc(namespaceId);
   }
 
   public Item findOne(long itemId) {
@@ -80,65 +85,99 @@ public class ItemService {
     return item;
   }
 
-  public List<Item> findItems(Long namespaceId) {
+  public List<Item> findItemsWithoutOrdered(Long namespaceId) {
+    List<Item> items = itemRepository.findByNamespaceId(namespaceId);
+    if (items == null) {
+      return Collections.emptyList();
+    }
+    return items;
+  }
+
+  public List<Item> findItemsWithoutOrdered(String appId, String clusterName, String namespaceName) {
+    Namespace namespace = namespaceService.findOne(appId, clusterName, namespaceName);
+    if (namespace != null) {
+      return findItemsWithoutOrdered(namespace.getId());
+    } else {
+      return Collections.emptyList();
+    }
+  }
+
+  public List<Item> findItemsWithOrdered(Long namespaceId) {
     List<Item> items = itemRepository.findByNamespaceIdOrderByLineNumAsc(namespaceId);
     if (items == null) {
       return Collections.emptyList();
     }
     return items;
   }
-  
-  public List<Item> findItems(String appId, String clusterName, String namespaceName) {
-    Namespace namespace = namespaceRepository.findByAppIdAndClusterNameAndNamespaceName(appId, clusterName,
-        namespaceName);
+
+  public List<Item> findItemsWithOrdered(String appId, String clusterName, String namespaceName) {
+    Namespace namespace = namespaceService.findOne(appId, clusterName, namespaceName);
     if (namespace != null) {
-      return findItems(namespace.getId());
+      return findItemsWithOrdered(namespace.getId());
     } else {
       return Collections.emptyList();
     }
   }
-  
+
+  public List<Item> findItemsModifiedAfterDate(long namespaceId, Date date) {
+    return itemRepository.findByNamespaceIdAndDataChangeLastModifiedTimeGreaterThan(namespaceId, date);
+  }
+
   @Transactional
   public Item save(Item entity) {
     checkItemKeyLength(entity.getKey());
-    checkItemValueLength(entity.getValue());
+    checkItemValueLength(entity.getNamespaceId(), entity.getValue());
 
     entity.setId(0);//protection
+
+    if (entity.getLineNum() == 0) {
+      Item lastItem = findLastOne(entity.getNamespaceId());
+      int lineNum = lastItem == null ? 1 : lastItem.getLineNum() + 1;
+      entity.setLineNum(lineNum);
+    }
+
     Item item = itemRepository.save(entity);
 
     auditService.audit(Item.class.getSimpleName(), item.getId(), Audit.OP.INSERT,
-        item.getDataChangeCreatedBy());
+                       item.getDataChangeCreatedBy());
 
     return item;
   }
 
   @Transactional
   public Item update(Item item) {
-    checkItemValueLength(item.getValue());
+    checkItemValueLength(item.getNamespaceId(), item.getValue());
     Item managedItem = itemRepository.findOne(item.getId());
     BeanUtils.copyEntityProperties(item, managedItem);
     managedItem = itemRepository.save(managedItem);
 
     auditService.audit(Item.class.getSimpleName(), managedItem.getId(), Audit.OP.UPDATE,
-        managedItem.getDataChangeLastModifiedBy());
+                       managedItem.getDataChangeLastModifiedBy());
 
     return managedItem;
   }
 
-  private boolean checkItemValueLength(String value){
-    int lengthLimit = Integer.valueOf(serverConfigService.getValue("item.value.length.limit", "20000"));
-    if (!StringUtils.isEmpty(value) && value.length() > lengthLimit){
-      throw new BadRequestException("value too long. length limit:" + lengthLimit);
+  private boolean checkItemValueLength(long namespaceId, String value) {
+    int limit = getItemValueLengthLimit(namespaceId);
+    if (!StringUtils.isEmpty(value) && value.length() > limit) {
+      throw new BadRequestException("value too long. length limit:" + limit);
     }
     return true;
   }
 
-  private boolean checkItemKeyLength(String key){
-    int lengthLimit = Integer.valueOf(serverConfigService.getValue("item.key.length.limit", "128"));
-    if (!StringUtils.isEmpty(key) && key.length() > lengthLimit){
-      throw new BadRequestException("key too long. length limit:" + lengthLimit);
+  private boolean checkItemKeyLength(String key) {
+    if (!StringUtils.isEmpty(key) && key.length() > bizConfig.itemKeyLengthLimit()) {
+      throw new BadRequestException("key too long. length limit:" + bizConfig.itemKeyLengthLimit());
     }
     return true;
+  }
+
+  private int getItemValueLengthLimit(long namespaceId) {
+    Map<Long, Integer> namespaceValueLengthOverride = bizConfig.namespaceValueLengthLimitOverride();
+    if (namespaceValueLengthOverride != null && namespaceValueLengthOverride.containsKey(namespaceId)) {
+      return namespaceValueLengthOverride.get(namespaceId);
+    }
+    return bizConfig.itemValueLengthLimit();
   }
 
 }

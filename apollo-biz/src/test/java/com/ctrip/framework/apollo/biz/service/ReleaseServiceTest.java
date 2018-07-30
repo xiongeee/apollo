@@ -4,6 +4,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 
 import com.ctrip.framework.apollo.biz.AbstractUnitTest;
+import com.ctrip.framework.apollo.biz.MockBeanFactory;
 import com.ctrip.framework.apollo.biz.entity.Release;
 import com.ctrip.framework.apollo.biz.repository.ReleaseRepository;
 import com.ctrip.framework.apollo.common.exception.BadRequestException;
@@ -32,6 +33,10 @@ public class ReleaseServiceTest extends AbstractUnitTest {
   private ReleaseRepository releaseRepository;
   @Mock
   private NamespaceService namespaceService;
+  @Mock
+  private ReleaseHistoryService releaseHistoryService;
+  @Mock
+  private ItemSetService itemSetService;
   @InjectMocks
   private ReleaseService releaseService;
 
@@ -112,9 +117,8 @@ public class ReleaseServiceTest extends AbstractUnitTest {
     String someReleaseKey = "someKey";
     String someValidConfiguration = "{\"apollo.bar\": \"foo\"}";
 
-    Release
-        someRelease =
-        assembleRelease(someReleaseId, someReleaseKey, someAppId, someClusterName,
+    Release someRelease =
+        MockBeanFactory.mockRelease(someReleaseId, someReleaseKey, someAppId, someClusterName,
                         someNamespaceName,
                         someValidConfiguration);
 
@@ -183,19 +187,6 @@ public class ReleaseServiceTest extends AbstractUnitTest {
     List<Release> result = releaseService.findByReleaseKeys(someReleaseKeys);
 
     assertEquals(someReleases, result);
-  }
-
-  private Release assembleRelease(long releaseId, String releaseKey, String appId,
-                                  String clusterName,
-                                  String groupName, String configurations) {
-    Release release = new Release();
-    release.setId(releaseId);
-    release.setReleaseKey(releaseKey);
-    release.setAppId(appId);
-    release.setClusterName(clusterName);
-    release.setNamespaceName(groupName);
-    release.setConfigurations(configurations);
-    return release;
   }
 
 

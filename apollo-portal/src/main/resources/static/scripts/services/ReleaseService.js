@@ -16,7 +16,11 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
         },
         release: {
             method: 'POST',
-            url: '/apps/:appId/envs/:env/clusters/:clusterName/namespaces/:namespaceName/release'
+            url: '/apps/:appId/envs/:env/clusters/:clusterName/namespaces/:namespaceName/releases'
+        },
+        gray_release: {
+            method: 'POST',
+            url: '/apps/:appId/envs/:env/clusters/:clusterName/namespaces/:namespaceName/branches/:branchName/releases'
         },
         rollback: {
             method: 'PUT',
@@ -24,7 +28,7 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
         }
     });
 
-    function createRelease(appId, env, clusterName, namespaceName, releaseTitle, comment) {
+    function createRelease(appId, env, clusterName, namespaceName, releaseTitle, comment, isEmergencyPublish) {
         var d = $q.defer();
         resource.release({
                              appId: appId,
@@ -33,7 +37,8 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
                              namespaceName: namespaceName
                          }, {
                              releaseTitle: releaseTitle,
-                             releaseComment: comment
+                             releaseComment: comment,
+                             isEmergencyPublish: isEmergencyPublish
                          }, function (result) {
             d.resolve(result);
         }, function (result) {
@@ -42,14 +47,35 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
         return d.promise;
     }
 
-    function findAllReleases(appId, env, clusterName, namespaceName, page) {
+    function createGrayRelease(appId, env, clusterName, namespaceName, branchName, releaseTitle, comment, isEmergencyPublish) {
+        var d = $q.defer();
+        resource.gray_release({
+                                  appId: appId,
+                                  env: env,
+                                  clusterName: clusterName,
+                                  namespaceName: namespaceName,
+                                  branchName: branchName
+                              }, {
+                                  releaseTitle: releaseTitle,
+                                  releaseComment: comment,
+                                  isEmergencyPublish: isEmergencyPublish
+                              }, function (result) {
+            d.resolve(result);
+        }, function (result) {
+            d.reject(result);
+        });
+        return d.promise;
+    }
+
+    function findAllReleases(appId, env, clusterName, namespaceName, page, size) {
         var d = $q.defer();
         resource.find_all_releases({
                                        appId: appId,
                                        env: env,
                                        clusterName: clusterName,
                                        namespaceName: namespaceName,
-                                       page: page
+                                       page: page,
+                                       size: size
                                    }, function (result) {
             d.resolve(result);
         }, function (result) {
@@ -75,12 +101,35 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
         return d.promise;
     }
 
-    function compare(env, firstReleaseId, secondReleaseId) {
+    function findLatestActiveRelease(appId, env, clusterName, namespaceName) {
+        var d = $q.defer();
+        resource.find_active_releases({
+                                          appId: appId,
+                                          env: env,
+                                          clusterName: clusterName,
+                                          namespaceName: namespaceName,
+                                          page: 0,
+                                          size: 1
+                                      }, function (result) {
+            if (result && result.length) {
+                d.resolve(result[0]);
+            }
+
+            d.resolve(undefined);
+
+        }, function (result) {
+            d.reject(result);
+        });
+        return d.promise;
+
+    }
+
+    function compare(env, baseReleaseId, toCompareReleaseId) {
         var d = $q.defer();
         resource.compare({
                              env: env,
-                             firstReleaseId: firstReleaseId,
-                             secondReleaseId: secondReleaseId
+                             baseReleaseId: baseReleaseId,
+                             toCompareReleaseId: toCompareReleaseId
                          }, function (result) {
             d.resolve(result);
         }, function (result) {
@@ -105,9 +154,11 @@ appService.service('ReleaseService', ['$resource', '$q', function ($resource, $q
     }
 
     return {
-        release: createRelease,
+        publish: createRelease,
+        grayPublish: createGrayRelease,
         findAllRelease: findAllReleases,
         findActiveReleases: findActiveReleases,
+        findLatestActiveRelease: findLatestActiveRelease,
         compare: compare,
         rollback: rollback
     }

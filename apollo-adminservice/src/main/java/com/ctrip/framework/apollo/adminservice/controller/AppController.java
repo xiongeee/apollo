@@ -1,6 +1,14 @@
 package com.ctrip.framework.apollo.adminservice.controller;
 
-import java.util.List;
+import com.ctrip.framework.apollo.biz.service.AdminService;
+import com.ctrip.framework.apollo.biz.service.AppService;
+import com.ctrip.framework.apollo.common.dto.AppDTO;
+import com.ctrip.framework.apollo.common.entity.App;
+import com.ctrip.framework.apollo.common.exception.BadRequestException;
+import com.ctrip.framework.apollo.common.exception.NotFoundException;
+import com.ctrip.framework.apollo.common.utils.BeanUtils;
+import com.ctrip.framework.apollo.common.utils.InputValidator;
+import com.ctrip.framework.apollo.core.utils.StringUtils;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
@@ -11,15 +19,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.ctrip.framework.apollo.common.entity.App;
-import com.ctrip.framework.apollo.biz.service.AdminService;
-import com.ctrip.framework.apollo.biz.service.AppService;
-import com.ctrip.framework.apollo.common.utils.BeanUtils;
-import com.ctrip.framework.apollo.common.utils.InputValidator;
-import com.ctrip.framework.apollo.common.dto.AppDTO;
-import com.ctrip.framework.apollo.common.exception.BadRequestException;
-import com.ctrip.framework.apollo.common.exception.NotFoundException;
-import com.ctrip.framework.apollo.core.utils.StringUtils;
+import java.util.List;
+import java.util.Objects;
 
 @RestController
 public class AppController {
@@ -47,16 +48,25 @@ public class AppController {
     return dto;
   }
 
-  @RequestMapping(path = "/apps/{appId}", method = RequestMethod.DELETE)
+  @RequestMapping(value = "/apps/{appId:.+}", method = RequestMethod.DELETE)
   public void delete(@PathVariable("appId") String appId, @RequestParam String operator) {
     App entity = appService.findOne(appId);
     if (entity == null) {
       throw new NotFoundException("app not found for appId " + appId);
     }
-    appService.delete(entity.getId(), operator);
+    adminService.deleteApp(entity, operator);
   }
 
-  @RequestMapping("/apps")
+  @RequestMapping(value = "/apps/{appId:.+}", method = RequestMethod.PUT)
+  public void update(@PathVariable String appId, @RequestBody App app) {
+    if (!Objects.equals(appId, app.getAppId())) {
+      throw new BadRequestException("The App Id of path variable and request body is different");
+    }
+
+    appService.update(app);
+  }
+
+  @RequestMapping(value = "/apps", method = RequestMethod.GET)
   public List<AppDTO> find(@RequestParam(value = "name", required = false) String name,
                            Pageable pageable) {
     List<App> app = null;
@@ -68,7 +78,7 @@ public class AppController {
     return BeanUtils.batchTransform(AppDTO.class, app);
   }
 
-  @RequestMapping("/apps/{appId}")
+  @RequestMapping(value = "/apps/{appId:.+}", method = RequestMethod.GET)
   public AppDTO get(@PathVariable("appId") String appId) {
     App app = appService.findOne(appId);
     if (app == null) {
@@ -77,9 +87,8 @@ public class AppController {
     return BeanUtils.transfrom(AppDTO.class, app);
   }
 
-  @RequestMapping("/apps/{appId}/unique")
+  @RequestMapping(value = "/apps/{appId}/unique", method = RequestMethod.GET)
   public boolean isAppIdUnique(@PathVariable("appId") String appId) {
     return appService.isAppIdUnique(appId);
   }
-
 }

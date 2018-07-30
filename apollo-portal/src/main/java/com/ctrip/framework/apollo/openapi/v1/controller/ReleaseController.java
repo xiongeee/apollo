@@ -8,9 +8,9 @@ import com.ctrip.framework.apollo.core.enums.Env;
 import com.ctrip.framework.apollo.core.utils.StringUtils;
 import com.ctrip.framework.apollo.openapi.dto.OpenReleaseDTO;
 import com.ctrip.framework.apollo.openapi.util.OpenApiBeanUtils;
-import com.ctrip.framework.apollo.portal.entity.form.NamespaceReleaseModel;
+import com.ctrip.framework.apollo.portal.entity.model.NamespaceReleaseModel;
 import com.ctrip.framework.apollo.portal.service.ReleaseService;
-import com.ctrip.framework.apollo.portal.service.UserService;
+import com.ctrip.framework.apollo.portal.spi.UserService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,18 +33,18 @@ public class ReleaseController {
   @Autowired
   private UserService userService;
 
-  @PreAuthorize(value = "@consumerPermissionValidator.hasReleaseNamespacePermission(#request, #appId, #namespaceName)")
+  @PreAuthorize(value = "@consumerPermissionValidator.hasReleaseNamespacePermission(#request, #appId, #namespaceName, #env)")
   @RequestMapping(value = "/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/releases", method = RequestMethod.POST)
   public OpenReleaseDTO createRelease(@PathVariable String appId, @PathVariable String env,
-                                      @PathVariable String clusterName, @PathVariable String
-                                          namespaceName,
+                                      @PathVariable String clusterName,
+                                      @PathVariable String namespaceName,
                                       @RequestBody NamespaceReleaseModel model,
                                       HttpServletRequest request) {
 
     checkModel(model != null);
     RequestPrecondition.checkArguments(!StringUtils.isContainEmpty(model.getReleasedBy(), model
             .getReleaseTitle()),
-        "releaseTitle and releaseBy can not be empty");
+        "Params(releaseTitle and releasedBy) can not be empty");
 
     if (userService.findByUserId(model.getReleasedBy()) == null) {
       throw new BadRequestException("user(releaseBy) not exists");
@@ -55,7 +55,7 @@ public class ReleaseController {
     model.setClusterName(clusterName);
     model.setNamespaceName(namespaceName);
 
-    return OpenApiBeanUtils.transformFromReleaseDTO(releaseService.createRelease(model));
+    return OpenApiBeanUtils.transformFromReleaseDTO(releaseService.publish(model));
   }
 
   @RequestMapping(value = "/apps/{appId}/clusters/{clusterName}/namespaces/{namespaceName}/releases/latest", method = RequestMethod.GET)

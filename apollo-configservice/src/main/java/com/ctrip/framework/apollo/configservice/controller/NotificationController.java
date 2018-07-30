@@ -10,13 +10,13 @@ import com.google.common.collect.Multimaps;
 import com.ctrip.framework.apollo.biz.entity.ReleaseMessage;
 import com.ctrip.framework.apollo.biz.message.ReleaseMessageListener;
 import com.ctrip.framework.apollo.biz.message.Topics;
-import com.ctrip.framework.apollo.biz.service.ReleaseMessageService;
 import com.ctrip.framework.apollo.biz.utils.EntityManagerUtil;
+import com.ctrip.framework.apollo.configservice.service.ReleaseMessageServiceWithCache;
 import com.ctrip.framework.apollo.configservice.util.NamespaceUtil;
 import com.ctrip.framework.apollo.configservice.util.WatchKeysUtil;
 import com.ctrip.framework.apollo.core.ConfigConsts;
 import com.ctrip.framework.apollo.core.dto.ApolloConfigNotification;
-import com.dianping.cat.Cat;
+import com.ctrip.framework.apollo.tracer.Tracer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +35,7 @@ import java.util.Set;
 /**
  * @author Jason Song(song_s@ctrip.com)
  */
+@Deprecated
 @RestController
 @RequestMapping("/notifications")
 public class NotificationController implements ReleaseMessageListener {
@@ -51,7 +52,7 @@ public class NotificationController implements ReleaseMessageListener {
   private WatchKeysUtil watchKeysUtil;
 
   @Autowired
-  private ReleaseMessageService releaseMessageService;
+  private ReleaseMessageServiceWithCache releaseMessageService;
 
   @Autowired
   private EntityManagerUtil entityManagerUtil;
@@ -107,17 +108,17 @@ public class NotificationController implements ReleaseMessageListener {
       }
 
       deferredResult
-          .onTimeout(() -> logWatchedKeysToCat(watchedKeys, "Apollo.LongPoll.TimeOutKeys"));
+          .onTimeout(() -> logWatchedKeys(watchedKeys, "Apollo.LongPoll.TimeOutKeys"));
 
       deferredResult.onCompletion(() -> {
         //unregister all keys
         for (String key : watchedKeys) {
           deferredResults.remove(key, deferredResult);
         }
-        logWatchedKeysToCat(watchedKeys, "Apollo.LongPoll.CompletedKeys");
+        logWatchedKeys(watchedKeys, "Apollo.LongPoll.CompletedKeys");
       });
 
-      logWatchedKeysToCat(watchedKeys, "Apollo.LongPoll.RegisteredKeys");
+      logWatchedKeys(watchedKeys, "Apollo.LongPoll.RegisteredKeys");
       logger.debug("Listening {} from appId: {}, cluster: {}, namespace: {}, datacenter: {}",
           watchedKeys, appId, cluster, namespace, dataCenter);
     }
@@ -130,7 +131,7 @@ public class NotificationController implements ReleaseMessageListener {
     logger.info("message received - channel: {}, message: {}", channel, message);
 
     String content = message.getMessage();
-    Cat.logEvent("Apollo.LongPoll.Messages", content);
+    Tracer.logEvent("Apollo.LongPoll.Messages", content);
     if (!Topics.APOLLO_RELEASE_TOPIC.equals(channel) || Strings.isNullOrEmpty(content)) {
       return;
     }
@@ -159,9 +160,9 @@ public class NotificationController implements ReleaseMessageListener {
     logger.debug("Notification completed");
   }
 
-  private void logWatchedKeysToCat(Set<String> watchedKeys, String eventName) {
+  private void logWatchedKeys(Set<String> watchedKeys, String eventName) {
     for (String watchedKey : watchedKeys) {
-      Cat.logEvent(eventName, watchedKey);
+      Tracer.logEvent(eventName, watchedKey);
     }
   }
 }
